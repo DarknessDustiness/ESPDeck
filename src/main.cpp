@@ -200,7 +200,6 @@ private:
 public:
     void init() {
         BLEDevice::init("ESP32_MIDI_Ctrl");
-        startScan();
     }
 
     void startScan() {
@@ -211,7 +210,8 @@ public:
         pBLEScan->setInterval(1349);
         pBLEScan->setWindow(449);
         pBLEScan->setActiveScan(true);
-        pBLEScan->start(5, false);
+        // Non-blocking 1-second scan to prevent Watchdog Timer timeouts
+        pBLEScan->start(1, false);
     }
 
     void update() {
@@ -219,7 +219,7 @@ public:
             connect();
         } else if (!connected && !scanning) {
             static unsigned long lastScanTime = 0;
-            if (millis() - lastScanTime > 5000) {
+            if (millis() - lastScanTime > 3000) {
                 lastScanTime = millis();
                 startScan();
             }
@@ -370,12 +370,30 @@ void setup() {
     Serial.begin(115200);
     pinMode(JOYSTICK_SW_PIN, INPUT_PULLUP);
 
+    // 1. Force screen clear first to verify SPI display hardware
     tft.init();
     tft.setRotation(3);
-    spr.createSprite(160, 128);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString("Booting...", 10, 10, 2);
 
+    // 2. Allocate Sprite buffer before BLE stack reservation
+    if (spr.createSprite(160, 128) == nullptr) {
+        Serial.println("Error: Insufficient RAM for TFT Sprite!");
+        tft.drawString("RAM Error!", 10, 30, 2);
+        while (1) yield();
+    }
+
+    tft.drawString("Init Screen OK", 10, 30, 2);
+
+    // 3. Initialize screensaver and BLE controller
     waveSaver.init(spr);
+    
+    tft.drawString("Init BLE...", 10, 50, 2);
     rolandBLE.init();
+    
+    tft.drawString("Ready!", 10, 70, 2);
+    delay(300);
 }
 
 int getJoystickXDirection() {
@@ -493,7 +511,6 @@ void renderRolandView(TFT_eSprite &canvas) {
         canvas.setTextColor(TFT_YELLOW, canvas.color565(25, 15, 35));
         canvas.drawString("SELECT SOUND", 36, 34, 1);
 
-        int maxP = CATEGORIES[currentCategoryIdx].count;
         canvas.setTextColor(TFT_WHITE, canvas.color565(25, 15, 35));
         canvas.drawString(CATEGORIES[currentCategoryIdx].patches[currentPatchIdx].name, 12, 56, 2);
     }
